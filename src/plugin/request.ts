@@ -1,6 +1,6 @@
 import * as crypto from 'crypto'
 import * as os from 'os'
-import { KIRO_CONSTANTS } from '../constants.js'
+import { KIRO_CONSTANTS, buildUrl, extractRegionFromArn } from '../constants.js'
 import {
   buildHistory,
   extractToolNamesFromHistory,
@@ -238,7 +238,7 @@ export function transformToCodeWhisperer(
     osP === 'win32' ? `windows#${osR}` : osP === 'darwin' ? `macos#${osR}` : `${osP}#${osR}`
   const ua = `aws-sdk-js/3.738.0 ua/2.1 os/${osN} lang/js md/nodejs#${nodeV} api/codewhisperer#3.738.0 m/E KiroIDE`
   return {
-    url: KIRO_CONSTANTS.BASE_URL.replace('{{region}}', auth.region),
+    url: buildUrl(KIRO_CONSTANTS.BASE_URL, extractRegionFromArn(auth.profileArn) ?? auth.region),
     init: {
       method: 'POST',
       headers: {
