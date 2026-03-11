@@ -1,5 +1,6 @@
 import type { AccountRepository } from '../../infrastructure/database/account-repository'
 import type { AccountManager } from '../../plugin/accounts'
+import * as logger from '../../plugin/logger'
 import type { ManagedAccount } from '../../plugin/types'
 
 type ToastFunction = (message: string, variant: 'info' | 'warning' | 'success' | 'error') => void
@@ -28,12 +29,30 @@ export class ErrorHandler {
     context: RequestContext,
     showToast: ToastFunction
   ): Promise<{ shouldRetry: boolean; newContext?: RequestContext; switchAccount?: boolean }> {
-    if (response.status === 400 && context.reductionFactor > 0.4) {
-      const newFactor = context.reductionFactor - 0.2
-      showToast(`Context too long. Retrying with ${Math.round(newFactor * 100)}%...`, 'warning')
-      return {
-        shouldRetry: true,
-        newContext: { ...context, reductionFactor: newFactor }
+    if (response.status === 400) {
+      const body = await response.text()
+      try {
+        const errorData = JSON.parse(body)
+        if (errorData.reason === 'INVALID_MODEL_ID') {
+          throw new Error(`Invalid model: ${errorData.message}`)
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('Invalid model')) {
+          throw e
+        }
+      }
+      logger.warn('HTTP 400 response body', {
+        body,
+        reductionFactor: context.reductionFactor,
+        email: account.email
+      })
+      if (context.reductionFactor > 0.4) {
+        const newFactor = context.reductionFactor - 0.2
+        showToast(`Context too long. Retrying with ${Math.round(newFactor * 100)}%...`, 'warning')
+        return {
+          shouldRetry: true,
+          newContext: { ...context, reductionFactor: newFactor }
+        }
       }
     }
 
