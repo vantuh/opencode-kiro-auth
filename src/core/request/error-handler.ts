@@ -31,15 +31,15 @@ export class ErrorHandler {
   ): Promise<{ shouldRetry: boolean; newContext?: RequestContext; switchAccount?: boolean }> {
     if (response.status === 400) {
       const body = await response.text()
-      try {
-        const errorData = JSON.parse(body)
-        if (errorData.reason === 'INVALID_MODEL_ID') {
-          throw new Error(`Invalid model: ${errorData.message}`)
+      const errorData = (() => {
+        try {
+          return JSON.parse(body)
+        } catch {
+          return null
         }
-      } catch (e) {
-        if (e instanceof Error && e.message.includes('Invalid model')) {
-          throw e
-        }
+      })()
+      if (errorData?.reason === 'INVALID_MODEL_ID') {
+        throw new Error(`Invalid model: ${errorData.message}`)
       }
       logger.warn('HTTP 400 response body', {
         body,
@@ -117,20 +117,20 @@ export class ErrorHandler {
     ) {
       let errorReason = response.status === 402 ? 'Quota' : 'Forbidden'
       let isPermanent = false
-      try {
-        const errorBody = await response.text()
-        const errorData = JSON.parse(errorBody)
-        if (errorData.reason === 'INVALID_MODEL_ID') {
-          throw new Error(`Invalid model: ${errorData.message}`)
+      const errorBody = await response.text()
+      const errorData = (() => {
+        try {
+          return JSON.parse(errorBody)
+        } catch {
+          return null
         }
-        if (errorData.reason === 'TEMPORARILY_SUSPENDED') {
-          errorReason = 'Account Suspended'
-          isPermanent = true
-        }
-      } catch (e) {
-        if (e instanceof Error && e.message.includes('Invalid model')) {
-          throw e
-        }
+      })()
+      if (errorData?.reason === 'INVALID_MODEL_ID') {
+        throw new Error(`Invalid model: ${errorData.message}`)
+      }
+      if (errorData?.reason === 'TEMPORARILY_SUSPENDED') {
+        errorReason = 'Account Suspended'
+        isPermanent = true
       }
       if (isPermanent) {
         account.failCount = 10
