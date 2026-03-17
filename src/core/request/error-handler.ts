@@ -1,6 +1,5 @@
 import type { AccountRepository } from '../../infrastructure/database/account-repository'
 import type { AccountManager } from '../../plugin/accounts'
-import * as logger from '../../plugin/logger'
 import type { ManagedAccount } from '../../plugin/types'
 
 type ToastFunction = (message: string, variant: 'info' | 'warning' | 'success' | 'error') => void
@@ -29,26 +28,23 @@ export class ErrorHandler {
     context: RequestContext,
     showToast: ToastFunction
   ): Promise<{ shouldRetry: boolean; newContext?: RequestContext; switchAccount?: boolean }> {
-    if (response.status === 400) {
-      const body = await response.text()
-      const errorData = (() => {
-        try {
-          return JSON.parse(body)
-        } catch {
-          return null
-        }
-      })()
-      if (errorData?.reason === 'INVALID_MODEL_ID') {
-        throw new Error(`Invalid model: ${errorData.message}`)
+    const readBody = async (): Promise<string> => {
+      try {
+        const body = JSON.parse(await response.clone().text())
+        return body.message || body.Message || body.__type || JSON.stringify(body)
+      } catch {
+        return ''
       }
-      logger.warn('HTTP 400 response body', {
-        body,
-        reductionFactor: context.reductionFactor,
-        email: account.email
-      })
+    }
+
+    if (response.status === 400) {
+      const reason = await readBody()
       if (context.reductionFactor > 0.4) {
         const newFactor = context.reductionFactor - 0.2
-        showToast(`Context too long. Retrying with ${Math.round(newFactor * 100)}%...`, 'warning')
+        showToast(
+          `400: ${reason || 'unknown'}. Retrying with ${Math.round(newFactor * 100)}%...`,
+          'warning'
+        )
         return {
           shouldRetry: true,
           newContext: { ...context, reductionFactor: newFactor }
@@ -57,6 +53,8 @@ export class ErrorHandler {
     }
 
     if (response.status === 401 && context.retry < this.config.rate_limit_max_retries) {
+      const reason = await readBody()
+      showToast(`401: ${reason || 'Unauthorized'}. Retrying...`, 'warning')
       return {
         shouldRetry: true,
         newContext: { ...context, retry: context.retry + 1 }
@@ -78,10 +76,7 @@ export class ErrorHandler {
 
       if (account.failCount < 5) {
         const delay = 1000 * Math.pow(2, account.failCount - 1)
-        showToast(
-          `Server Error (500): ${errorMessage}. Retrying in ${Math.ceil(delay / 1000)}s...`,
-          'warning'
-        )
+        showToast(`500: ${errorMessage}. Retrying in ${Math.ceil(delay / 1000)}s...`, 'warning')
         await this.sleep(delay)
         return { shouldRetry: true }
       } else {
@@ -90,10 +85,7 @@ export class ErrorHandler {
           `Server Error (500) after 5 attempts: ${errorMessage}`
         )
         await this.repository.batchSave(this.accountManager.getAccounts())
-        showToast(
-          `Server Error (500): ${errorMessage}. Marking account as unhealthy and switching...`,
-          'warning'
-        )
+        showToast(`500: ${errorMessage}. Marking account as unhealthy and switching...`, 'warning')
         return { shouldRetry: true, switchAccount: true }
       }
     }
@@ -106,7 +98,7 @@ export class ErrorHandler {
       if (count > 1) {
         return { shouldRetry: true, switchAccount: true }
       }
-      showToast(`Rate limited. Waiting ${Math.ceil(w / 1000)}s...`, 'warning')
+      showToast(`429: Rate limited. Waiting ${Math.ceil(w / 1000)}s...`, 'warning')
       await this.sleep(w)
       return { shouldRetry: true }
     }
@@ -135,11 +127,14 @@ export class ErrorHandler {
       if (isPermanent) {
         account.failCount = 10
       }
+      showToast(`${response.status}: ${errorReason}. Switching account...`, 'warning')
       this.accountManager.markUnhealthy(account, errorReason)
       await this.repository.batchSave(this.accountManager.getAccounts())
       return { shouldRetry: true, switchAccount: true }
     }
 
+    const reason = await readBody()
+    showToast(`${response.status}: ${reason || response.statusText}`, 'error')
     return { shouldRetry: false }
   }
 
