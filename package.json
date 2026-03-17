@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "format": "prettier --write 'src/**/*.ts'",
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
     "prepare": "husky"
   },

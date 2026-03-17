@@ -77,6 +77,12 @@ export const MODEL_MAPPING: Record<string, string> = {
 
 export const SUPPORTED_MODELS = Object.keys(MODEL_MAPPING)
 
+const LONG_CONTEXT_MODELS = new Set(Object.keys(MODEL_MAPPING).filter((k) => k.includes('-1m')))
+
+export function isLongContextModel(model: string): boolean {
+  return LONG_CONTEXT_MODELS.has(model)
+}
+
 export const KIRO_AUTH_SERVICE = {
   ENDPOINT: 'https://prod.{{region}}.auth.desktop.kiro.dev',
   SSO_OIDC_ENDPOINT: 'https://oidc.{{region}}.amazonaws.com',
