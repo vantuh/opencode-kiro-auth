@@ -28,7 +28,8 @@ export class RequestHandler {
   constructor(
     private accountManager: AccountManager,
     private config: KiroConfig,
-    private repository: AccountRepository
+    private repository: AccountRepository,
+    private client?: any
   ) {
     this.accountSelector = new AccountSelector(accountManager, config, syncFromKiroCli, repository)
     this.tokenRefresher = new TokenRefresher(config, accountManager, syncFromKiroCli, repository)
@@ -70,7 +71,11 @@ export class RequestHandler {
       }
 
       if (this.allAccountsPermanentlyUnhealthy()) {
-        throw new Error('All accounts are permanently unhealthy (quota exceeded or suspended)')
+        const reauthed = await this.triggerReauth(showToast)
+        if (!reauthed) {
+          throw new Error('All accounts are permanently unhealthy. Please re-authenticate.')
+        }
+        continue
       }
 
       let acc = await this.accountSelector.selectHealthyAccount(showToast)
@@ -256,6 +261,29 @@ export class RequestHandler {
         rData,
         logger.getTimestamp()
       )
+    }
+  }
+
+  private async triggerReauth(showToast: ToastFunction): Promise<boolean> {
+    if (!this.client) return false
+    try {
+      showToast('Session expired. Re-authenticating...', 'warning')
+      await this.client.provider.oauth.authorize({
+        path: { id: 'kiro' },
+        body: { method: 0 }
+      })
+      // Sync fresh tokens from CLI after re-auth
+      await syncFromKiroCli()
+      this.repository.invalidateCache()
+      const accounts = await this.repository.findAll()
+      for (const acc of accounts) {
+        this.accountManager.addAccount(acc)
+      }
+      showToast('Re-authentication successful.', 'success')
+      return true
+    } catch (e) {
+      logger.error('Re-auth failed', e instanceof Error ? e : new Error(String(e)))
+      return false
     }
   }
 
