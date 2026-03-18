@@ -70,7 +70,8 @@ export class TokenRefresher {
         error.code === 'InvalidTokenException' ||
         error.code === 'HTTP_401' ||
         error.code === 'HTTP_403' ||
-        error.message.includes('Invalid refresh token provided'))
+        error.message.includes('Invalid refresh token provided') ||
+        error.message.includes('Invalid grant provided'))
     ) {
       this.accountManager.markUnhealthy(account, error.message)
       await this.repository.batchSave(this.accountManager.getAccounts())

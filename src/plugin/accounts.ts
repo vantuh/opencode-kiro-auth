@@ -177,7 +177,7 @@ export class AccountManager {
       delete acc.unhealthyReason
       delete acc.recoveryTime
       kiroDb.upsertAccount(acc).catch(() => {})
-      writeToKiroCli(acc).catch(() => {})
+      writeToKiroCli(acc).catch((e) => logger.warn('Failed to write token back to Kiro CLI', e))
     }
   }
   markRateLimited(a: ManagedAccount, ms: number): void {
