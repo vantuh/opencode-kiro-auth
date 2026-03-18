@@ -1,26 +1,40 @@
 import type { AccountRepository } from '../../infrastructure/database/account-repository'
 import type { AccountManager } from '../../plugin/accounts'
+import * as logger from '../../plugin/logger'
 import type { KiroAuthDetails, ManagedAccount } from '../../plugin/types'
 import { fetchUsageLimits, updateAccountQuota } from '../../plugin/usage'
 
 interface UsageTrackerConfig {
   usage_tracking_enabled: boolean
   usage_sync_max_retries: number
+  usage_sync_cooldown_ms?: number
 }
 
 export class UsageTracker {
+  private lastSyncTime = new Map<string, number>()
+  private readonly cooldownMs: number
+
   constructor(
     private config: UsageTrackerConfig,
     private accountManager: AccountManager,
     private repository: AccountRepository
-  ) {}
+  ) {
+    this.cooldownMs = config.usage_sync_cooldown_ms ?? 60000
+  }
 
   async syncUsage(account: ManagedAccount, auth: KiroAuthDetails): Promise<void> {
-    if (!this.config.usage_tracking_enabled) {
-      return
-    }
+    if (!this.config.usage_tracking_enabled) return
 
-    this.syncWithRetry(account, auth, 0).catch(() => {})
+    const last = this.lastSyncTime.get(account.id) ?? 0
+    if (Date.now() - last < this.cooldownMs) return
+
+    this.lastSyncTime.set(account.id, Date.now())
+    this.syncWithRetry(account, auth, 0).catch((e) => {
+      logger.warn('Usage sync failed after all retries', {
+        accountId: account.id,
+        error: e instanceof Error ? e.message : String(e)
+      })
+    })
   }
 
   private async syncWithRetry(
@@ -46,6 +60,8 @@ export class UsageTracker {
         this.accountManager.markUnhealthy(account, e.message)
         this.repository.save(account).catch(() => {})
       }
+
+      throw e
     }
   }
 
