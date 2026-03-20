@@ -45,7 +45,7 @@ export function buildHistory(
       if (trs.length) uim.userInputMessageContext = { toolResults: deduplicateToolResults(trs) }
       const prev = history[history.length - 1]
       if (prev && prev.userInputMessage)
-        history.push({ assistantResponseMessage: { content: 'Continue' } })
+        history.push({ assistantResponseMessage: { content: '[system: conversation continues]' } })
       history.push({ userInputMessage: uim })
     } else if (m.role === 'tool') {
       const trs: any[] = []
@@ -65,7 +65,7 @@ export function buildHistory(
       }
       const prev = history[history.length - 1]
       if (prev && prev.userInputMessage)
-        history.push({ assistantResponseMessage: { content: 'Continue' } })
+        history.push({ assistantResponseMessage: { content: '[system: conversation continues]' } })
       history.push({
         userInputMessage: {
           content: 'Tool results provided.',

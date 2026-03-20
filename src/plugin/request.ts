@@ -101,11 +101,11 @@ export function transformToCodeWhisperer(
     if (arm.content || arm.toolUses) {
       history.push({ assistantResponseMessage: arm })
     }
-    curContent = 'Continue'
+    curContent = '[system: conversation continues]'
   } else {
     const prev = history[history.length - 1]
     if (prev && !prev.assistantResponseMessage)
-      history.push({ assistantResponseMessage: { content: 'Continue' } })
+      history.push({ assistantResponseMessage: { content: '[system: conversation continues]' } })
     if (curMsg.role === 'tool') {
       if (curMsg.tool_results) {
         for (const tr of curMsg.tool_results)
@@ -139,7 +139,8 @@ export function transformToCodeWhisperer(
         curImgs.push(...convertImagesToKiroFormat(unifiedImages))
       }
     } else curContent = getContentText(curMsg)
-    if (!curContent) curContent = curTrs.length ? 'Tool results provided.' : 'Continue'
+    if (!curContent)
+      curContent = curTrs.length ? 'Tool results provided.' : '[system: conversation continues]'
   }
   const request: CodeWhispererRequest = {
     conversationState: {
