@@ -143,6 +143,11 @@ export async function* transformSdkStream(
         if (event.metadataEvent.contextUsagePercentage) {
           contextUsagePercentage = event.metadataEvent.contextUsagePercentage
         }
+      } else if ((event as any).contextUsageEvent) {
+        const cue = (event as any).contextUsageEvent
+        if (cue.contextUsagePercentage) {
+          contextUsagePercentage = cue.contextUsagePercentage
+        }
       }
     }
 
