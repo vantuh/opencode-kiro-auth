@@ -114,6 +114,9 @@ export class ErrorHandler {
           return null
         }
       })()
+      if (errorData?.message) {
+        errorReason = errorData.message
+      }
       if (errorData?.reason === 'INVALID_MODEL_ID') {
         throw new Error(`Invalid model: ${errorData.message}`)
       }
@@ -131,6 +134,23 @@ export class ErrorHandler {
         await this.repository.batchSave(this.accountManager.getAccounts())
         return { shouldRetry: true, switchAccount: true }
       }
+
+      if (
+        response.status === 403 &&
+        !isPermanent &&
+        context.retry < this.config.rate_limit_max_retries
+      ) {
+        const delay = this.config.rate_limit_retry_delay_ms * Math.pow(2, context.retry)
+        showToast(`403: ${errorReason}. Retrying in ${Math.ceil(delay / 1000)}s...`, 'warning')
+        await this.sleep(delay)
+        return {
+          shouldRetry: true,
+          newContext: { ...context, retry: context.retry + 1 }
+        }
+      }
+
+      showToast(`${response.status}: ${errorReason}`, 'error')
+      return { shouldRetry: false }
     }
 
     const reason = await readBody()
