@@ -112,4 +112,13 @@ export interface PreparedRequest {
   conversationId: string
 }
 
+export interface SdkPreparedRequest {
+  conversationState: CodeWhispererRequest['conversationState']
+  profileArn?: string
+  streaming: boolean
+  effectiveModel: string
+  conversationId: string
+  region: string
+}
+
 export type AccountSelectionStrategy = 'sticky' | 'round-robin' | 'lowest-usage'

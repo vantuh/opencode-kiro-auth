@@ -103,10 +103,7 @@ export class ErrorHandler {
       return { shouldRetry: true }
     }
 
-    if (
-      (response.status === 402 || response.status === 403) &&
-      this.accountManager.getAccountCount() > 1
-    ) {
+    if (response.status === 402 || response.status === 403) {
       let errorReason = response.status === 402 ? 'Quota' : 'Forbidden'
       let isPermanent = false
       const errorBody = await response.text()
@@ -127,10 +124,13 @@ export class ErrorHandler {
       if (isPermanent) {
         account.failCount = 10
       }
-      showToast(`${response.status}: ${errorReason}. Switching account...`, 'warning')
-      this.accountManager.markUnhealthy(account, errorReason)
-      await this.repository.batchSave(this.accountManager.getAccounts())
-      return { shouldRetry: true, switchAccount: true }
+
+      if (this.accountManager.getAccountCount() > 1) {
+        showToast(`${response.status}: ${errorReason}. Switching account...`, 'warning')
+        this.accountManager.markUnhealthy(account, errorReason)
+        await this.repository.batchSave(this.accountManager.getAccounts())
+        return { shouldRetry: true, switchAccount: true }
+      }
     }
 
     const reason = await readBody()

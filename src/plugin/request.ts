@@ -24,17 +24,27 @@ import {
   extractTextFromParts
 } from './image-handler.js'
 import { resolveKiroModel } from './models.js'
-import type { CodeWhispererRequest, KiroAuthDetails, PreparedRequest } from './types'
+import type {
+  CodeWhispererRequest,
+  KiroAuthDetails,
+  PreparedRequest,
+  SdkPreparedRequest
+} from './types'
 
-export function transformToCodeWhisperer(
-  url: string,
+interface TransformResult {
+  request: CodeWhispererRequest
+  resolved: string
+  convId: string
+}
+
+function buildCodeWhispererRequest(
   body: any,
   model: string,
   auth: KiroAuthDetails,
   think = false,
   budget = 20000,
   reductionFactor = 1.0
-): PreparedRequest {
+): TransformResult {
   const req = typeof body === 'string' ? JSON.parse(body) : body
   const { messages, tools, system } = req
   const convId = crypto.randomUUID()
@@ -258,6 +268,27 @@ export function transformToCodeWhisperer(
       }
     }
   }
+
+  return { request, resolved, convId }
+}
+
+export function transformToCodeWhisperer(
+  url: string,
+  body: any,
+  model: string,
+  auth: KiroAuthDetails,
+  think = false,
+  budget = 20000,
+  reductionFactor = 1.0
+): PreparedRequest {
+  const { request, resolved, convId } = buildCodeWhispererRequest(
+    body,
+    model,
+    auth,
+    think,
+    budget,
+    reductionFactor
+  )
   const osP = os.platform(),
     osR = os.release(),
     nodeV = process.version.replace('v', '')
@@ -284,5 +315,31 @@ export function transformToCodeWhisperer(
     streaming: true,
     effectiveModel: resolved,
     conversationId: convId
+  }
+}
+
+export function transformToSdkRequest(
+  body: any,
+  model: string,
+  auth: KiroAuthDetails,
+  think = false,
+  budget = 20000,
+  reductionFactor = 1.0
+): SdkPreparedRequest {
+  const { request, resolved, convId } = buildCodeWhispererRequest(
+    body,
+    model,
+    auth,
+    think,
+    budget,
+    reductionFactor
+  )
+  return {
+    conversationState: request.conversationState,
+    profileArn: request.profileArn,
+    streaming: true,
+    effectiveModel: resolved,
+    conversationId: convId,
+    region: extractRegionFromArn(auth.profileArn) ?? auth.region
   }
 }
