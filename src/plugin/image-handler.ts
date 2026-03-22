@@ -6,7 +6,7 @@ interface UnifiedImage {
 interface KiroImage {
   format: string
   source: {
-    bytes: string
+    bytes: Uint8Array
   }
 }
 
@@ -62,11 +62,16 @@ export function extractAllImages(content: any): UnifiedImage[] {
 export function convertImagesToKiroFormat(images: UnifiedImage[]): KiroImage[] {
   return images.map((img) => {
     const format = img.mediaType.split('/')[1] || 'png'
+    const binaryString = atob(img.data)
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
 
     return {
       format,
       source: {
-        bytes: img.data
+        bytes
       }
     }
   })
