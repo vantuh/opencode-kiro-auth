@@ -39,6 +39,9 @@ export class AuthHandler {
 
     const idcMethod = new IdcAuthMethod(this.config, this.repository, this.accountManager)
 
+    const configStartUrl = this.config.idc_start_url
+    const configRegion = this.config.idc_region
+
     return [
       {
         label: 'AWS Builder ID / IAM Identity Center',
@@ -47,7 +50,9 @@ export class AuthHandler {
           {
             type: 'text' as const,
             key: 'start_url',
-            message: 'IAM Identity Center Start URL (leave blank for AWS Builder ID)',
+            message: configStartUrl
+              ? `IAM Identity Center Start URL (current: ${configStartUrl}, leave blank to keep)`
+              : 'IAM Identity Center Start URL (leave blank for AWS Builder ID)',
             placeholder: 'https://your-company.awsapps.com/start',
             validate: (value: string) => {
               if (!value) return undefined
@@ -62,7 +67,10 @@ export class AuthHandler {
           {
             type: 'text' as const,
             key: 'idc_region',
-            message: 'IAM Identity Center region (sso_region) (leave blank for us-east-1)',
+            message:
+              configRegion && configRegion !== 'us-east-1'
+                ? `IAM Identity Center region (sso_region) (current: ${configRegion}, leave blank to keep)`
+                : 'IAM Identity Center region (sso_region) (leave blank for us-east-1)',
             placeholder: 'us-east-1',
             validate: (value: string) => {
               if (!value) return undefined
