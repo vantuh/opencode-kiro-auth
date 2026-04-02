@@ -231,6 +231,7 @@ function buildCodeWhispererRequest(
     finalCurTrs.push(...orphanedTrs.map((o) => o.result))
   }
   if (history.length > 0) (request.conversationState as any).history = history
+
   const uim = request.conversationState.currentMessage.userInputMessage
   if (uim) {
     uim.content = curContent

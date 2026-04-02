@@ -33,6 +33,7 @@ export async function* transformKiroStream(
 
   let rawBuffer = ''
   let totalContent = ''
+  let textOnlyContent = ''
   let outputTokens = 0
   let inputTokens = 0
   let contextUsagePercentage: number | null = null
@@ -55,6 +56,7 @@ export async function* transformKiroStream(
           contextUsagePercentage = event.data.contextUsagePercentage
         } else if (event.type === 'content' && event.data) {
           totalContent += event.data
+          textOnlyContent += event.data
 
           if (!thinkingRequested) {
             for (const ev of createTextDeltaEvents(event.data, streamState)) {
@@ -267,7 +269,7 @@ export async function* transformKiroStream(
       }
     }
 
-    outputTokens = estimateTokens(totalContent)
+    outputTokens = estimateTokens(textOnlyContent)
 
     if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
       const contextWindow = getContextWindowSize(model)

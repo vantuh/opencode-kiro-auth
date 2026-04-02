@@ -25,6 +25,7 @@ export async function* transformSdkStream(
   }
 
   let totalContent = ''
+  let textOnlyContent = ''
   let outputTokens = 0
   let inputTokens = 0
   let contextUsagePercentage: number | null = null
@@ -41,6 +42,7 @@ export async function* transformSdkStream(
       if (event.assistantResponseEvent?.content) {
         const text = event.assistantResponseEvent.content
         totalContent += text
+        textOnlyContent += text
 
         if (!thinkingRequested) {
           for (const ev of createTextDeltaEvents(text, streamState)) {
@@ -237,7 +239,7 @@ export async function* transformSdkStream(
       }
     }
 
-    outputTokens = estimateTokens(totalContent)
+    outputTokens = estimateTokens(textOnlyContent)
 
     if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
       const contextWindow = getContextWindowSize(model)
