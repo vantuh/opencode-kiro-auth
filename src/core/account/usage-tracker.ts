@@ -38,6 +38,11 @@ export class UsageTracker {
         return this.syncWithRetry(account, auth, attempt + 1)
       }
 
+      if (e.message?.includes('FEATURE_NOT_SUPPORTED')) {
+        // Some IDC profiles don't support getUsageLimits; don't penalize the account.
+        return
+      }
+
       if (
         e.message?.includes('403') ||
         e.message?.includes('invalid') ||

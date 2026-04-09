@@ -5,6 +5,7 @@ import type { AccountRepository } from '../../infrastructure/database/account-re
 import { authorizeKiroIDC, pollKiroIDCToken } from '../../kiro/oauth-idc.js'
 import { createDeterministicAccountId } from '../../plugin/accounts.js'
 import * as logger from '../../plugin/logger.js'
+import { makePlaceholderEmail } from '../../plugin/sync/kiro-cli-parser.js'
 import { readActiveProfileArnFromKiroCli } from '../../plugin/sync/kiro-cli-profile.js'
 import type { KiroRegion, ManagedAccount } from '../../plugin/types.js'
 import { fetchUsageLimits } from '../../plugin/usage.js'
@@ -102,7 +103,7 @@ export class IdcAuthMethod {
 
           const profileArn = configuredProfileArn || readActiveProfileArnFromKiroCli()
           const serviceRegion = extractRegionFromArn(profileArn) || configuredServiceRegion
-          let usage: any
+          let usage: any = { usedCount: 0, limitCount: 0, email: undefined }
           try {
             usage = await fetchUsageLimits({
               refresh: '',
@@ -122,14 +123,23 @@ export class IdcAuthMethod {
                 }`
               )
             }
-            throw e
+            const errMsg = e instanceof Error ? e.message : String(e)
+            if (errMsg.includes('FEATURE_NOT_SUPPORTED')) {
+              logger.warn('fetchUsageLimits returned FEATURE_NOT_SUPPORTED; skipping usage check', {
+                serviceRegion,
+                profileArn
+              })
+            } else {
+              throw e
+            }
           }
-          if (!usage.email) return { type: 'failed' }
 
-          const id = createDeterministicAccountId(usage.email, 'idc', token.clientId, profileArn)
+          const email =
+            usage.email || makePlaceholderEmail('idc', serviceRegion, token.clientId, profileArn)
+          const id = createDeterministicAccountId(email, 'idc', token.clientId, profileArn)
           const acc: ManagedAccount = {
             id,
-            email: usage.email,
+            email,
             authMethod: 'idc',
             region: serviceRegion,
             oidcRegion,
