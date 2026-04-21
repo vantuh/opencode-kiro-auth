@@ -5,14 +5,81 @@ import {
   extractTextFromParts
 } from '../../plugin/image-handler.js'
 import type { CodeWhispererMessage } from '../../plugin/types'
-import { getContentText, sanitizeHistory, truncate } from './message-transformer.js'
+import { getContentText } from './message-transformer.js'
 import { deduplicateToolResults } from './tool-transformer.js'
 
-export function buildHistory(
-  msgs: any[],
-  resolved: string,
-  toolResultLimit: number
-): CodeWhispererMessage[] {
+/**
+ * Collapse agentic loop sequences in the built history.
+ *
+ * Each agentic iteration gets a fresh conversationId, so the model re-derives its preamble
+ * (intent detection, greeting) every iteration. When replayed for the next user turn, the
+ * model sees duplicate preambles and gets confused.
+ *
+ * Strips text from intermediate ASST(toolUses)→USER(toolResults) pairs, keeping only the
+ * first assistant text and all tool_use/tool_result pairs.
+ */
+export function collapseAgenticLoops(history: CodeWhispererMessage[]): CodeWhispererMessage[] {
+  if (history.length < 4) return history
+
+  const result: CodeWhispererMessage[] = []
+  let i = 0
+
+  while (i < history.length) {
+    const entry = history[i]
+
+    if (
+      entry?.assistantResponseMessage?.toolUses &&
+      i + 1 < history.length &&
+      history[i + 1]?.userInputMessage?.userInputMessageContext?.toolResults
+    ) {
+      const seqStart = i
+
+      let j = i
+      while (j < history.length) {
+        const asst = history[j]
+        if (!asst?.assistantResponseMessage?.toolUses) break
+        const nextUser = j + 1 < history.length ? history[j + 1] : null
+        if (!nextUser?.userInputMessage?.userInputMessageContext?.toolResults) break
+        j += 2
+      }
+
+      const seqEnd = j
+      const pairCount = (seqEnd - seqStart) / 2
+
+      if (pairCount > 1) {
+        for (let k = seqStart; k < seqEnd; k += 2) {
+          const asst = history[k]
+          const user = history[k + 1]
+
+          if (k === seqStart) {
+            result.push(asst!)
+          } else {
+            result.push({
+              assistantResponseMessage: {
+                content: '[system: tool calling continues]',
+                toolUses: asst!.assistantResponseMessage!.toolUses
+              }
+            })
+          }
+          result.push(user!)
+        }
+      } else {
+        for (let k = seqStart; k < seqEnd; k++) {
+          result.push(history[k]!)
+        }
+      }
+
+      i = seqEnd
+    } else {
+      result.push(entry!)
+      i++
+    }
+  }
+
+  return result
+}
+
+export function buildHistory(msgs: any[], resolved: string): CodeWhispererMessage[] {
   let history: CodeWhispererMessage[] = []
   for (let i = 0; i < msgs.length - 1; i++) {
     const m = msgs[i]
@@ -27,7 +94,7 @@ export function buildHistory(
         for (const p of m.content) {
           if (p.type === 'tool_result') {
             trs.push({
-              content: [{ text: truncate(getContentText(p.content || p), toolResultLimit) }],
+              content: [{ text: getContentText(p.content || p) }],
               status: 'success',
               toolUseId: p.tool_use_id
             })
@@ -45,27 +112,27 @@ export function buildHistory(
       if (trs.length) uim.userInputMessageContext = { toolResults: deduplicateToolResults(trs) }
       const prev = history[history.length - 1]
       if (prev && prev.userInputMessage)
-        history.push({ assistantResponseMessage: { content: 'Continue' } })
+        history.push({ assistantResponseMessage: { content: '[system: conversation continues]' } })
       history.push({ userInputMessage: uim })
     } else if (m.role === 'tool') {
       const trs: any[] = []
       if (m.tool_results) {
         for (const tr of m.tool_results)
           trs.push({
-            content: [{ text: truncate(getContentText(tr), toolResultLimit) }],
+            content: [{ text: getContentText(tr) }],
             status: 'success',
             toolUseId: tr.tool_call_id
           })
       } else {
         trs.push({
-          content: [{ text: truncate(getContentText(m), toolResultLimit) }],
+          content: [{ text: getContentText(m) }],
           status: 'success',
           toolUseId: m.tool_call_id
         })
       }
       const prev = history[history.length - 1]
       if (prev && prev.userInputMessage)
-        history.push({ assistantResponseMessage: { content: 'Continue' } })
+        history.push({ assistantResponseMessage: { content: '[system: conversation continues]' } })
       history.push({
         userInputMessage: {
           content: 'Tool results provided.',
@@ -123,7 +190,7 @@ export function buildHistory(
       }
     }
   }
-  return history
+  return collapseAgenticLoops(history)
 }
 
 export function injectSystemPrompt(
@@ -146,25 +213,6 @@ export function injectSystemPrompt(
     })
   }
   return history
-}
-
-export function truncateHistory(
-  history: CodeWhispererMessage[],
-  historyLimit: number
-): CodeWhispererMessage[] {
-  let sanitized = sanitizeHistory(history)
-  let historySize = JSON.stringify(sanitized).length
-  while (historySize > historyLimit && sanitized.length > 2) {
-    sanitized.shift()
-    while (sanitized.length > 0) {
-      const first = sanitized[0]
-      if (first && first.userInputMessage) break
-      sanitized.shift()
-    }
-    sanitized = sanitizeHistory(sanitized)
-    historySize = JSON.stringify(sanitized).length
-  }
-  return sanitized
 }
 
 export function historyHasToolCalling(history: CodeWhispererMessage[]): boolean {

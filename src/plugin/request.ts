@@ -1,18 +1,16 @@
 import * as crypto from 'crypto'
 import * as os from 'os'
-import { KIRO_CONSTANTS, buildUrl, extractRegionFromArn, isLongContextModel } from '../constants.js'
+import { KIRO_CONSTANTS, buildUrl, extractRegionFromArn } from '../constants.js'
 import {
   buildHistory,
   extractToolNamesFromHistory,
   historyHasToolCalling,
-  injectSystemPrompt,
-  truncateHistory
+  injectSystemPrompt
 } from '../infrastructure/transformers/history-builder.js'
 import {
   findOriginalToolCall,
   getContentText,
-  mergeAdjacentMessages,
-  truncate
+  mergeAdjacentMessages
 } from '../infrastructure/transformers/message-transformer.js'
 import {
   convertToolsToCodeWhisperer,
@@ -24,17 +22,29 @@ import {
   extractTextFromParts
 } from './image-handler.js'
 import { resolveKiroModel } from './models.js'
-import type { CodeWhispererRequest, KiroAuthDetails, PreparedRequest } from './types'
+import type {
+  CodeWhispererRequest,
+  KiroAuthDetails,
+  PreparedRequest,
+  SdkPreparedRequest
+} from './types'
 
-export function transformToCodeWhisperer(
-  url: string,
+interface TransformResult {
+  request: CodeWhispererRequest
+  resolved: string
+  convId: string
+}
+
+type ToastFunction = (message: string, variant: 'info' | 'warning' | 'success' | 'error') => void
+
+function buildCodeWhispererRequest(
   body: any,
   model: string,
   auth: KiroAuthDetails,
   think = false,
   budget = 20000,
-  reductionFactor = 1.0
-): PreparedRequest {
+  showToast?: ToastFunction
+): TransformResult {
   const req = typeof body === 'string' ? JSON.parse(body) : body
   const { messages, tools, system } = req
   const convId = crypto.randomUUID()
@@ -55,14 +65,35 @@ export function transformToCodeWhisperer(
   const lastMsg = msgs[msgs.length - 1]
   if (lastMsg && lastMsg.role === 'assistant' && getContentText(lastMsg) === '{') msgs.pop()
   const cwTools = tools ? convertToolsToCodeWhisperer(tools) : []
-  const longCtx = isLongContextModel(model)
-  const toolResultLimit = Math.floor((longCtx ? 1250000 : 250000) * reductionFactor)
-  let history = buildHistory(msgs, resolved, toolResultLimit)
-  const historyLimit = Math.floor((longCtx ? 4250000 : 850000) * reductionFactor)
-  history = truncateHistory(history, historyLimit)
-  history = injectSystemPrompt(history, sys, resolved)
+  let history = buildHistory(msgs, resolved)
+
   const curMsg = msgs[msgs.length - 1]
   if (!curMsg) throw new Error('Empty')
+
+  const isRealUserMsg =
+    curMsg.role === 'user' &&
+    !(Array.isArray(curMsg.content) && curMsg.content.some((p: any) => p.type === 'tool_result'))
+
+  if (isRealUserMsg && msgs.length >= 2) {
+    const prevMsg = msgs[msgs.length - 2]
+    if (prevMsg?.role === 'assistant') {
+      const lastHistEntry = history[history.length - 1]
+      const historyEndsWithUser = lastHistEntry?.userInputMessage
+      if (historyEndsWithUser) {
+        let prevText = ''
+        if (Array.isArray(prevMsg.content)) {
+          for (const p of prevMsg.content) {
+            if (p.type === 'text') prevText += p.text || ''
+          }
+        } else prevText = getContentText(prevMsg)
+        if (prevText) {
+          history.push({ assistantResponseMessage: { content: prevText } })
+        }
+      }
+    }
+  }
+
+  history = injectSystemPrompt(history, sys, resolved)
   let curContent = ''
   const curTrs: any[] = []
   const curImgs: any[] = []
@@ -101,22 +132,22 @@ export function transformToCodeWhisperer(
     if (arm.content || arm.toolUses) {
       history.push({ assistantResponseMessage: arm })
     }
-    curContent = 'Continue'
+    curContent = '[system: conversation continues]'
   } else {
     const prev = history[history.length - 1]
     if (prev && !prev.assistantResponseMessage)
-      history.push({ assistantResponseMessage: { content: 'Continue' } })
+      history.push({ assistantResponseMessage: { content: '[system: conversation continues]' } })
     if (curMsg.role === 'tool') {
       if (curMsg.tool_results) {
         for (const tr of curMsg.tool_results)
           curTrs.push({
-            content: [{ text: truncate(getContentText(tr), toolResultLimit) }],
+            content: [{ text: getContentText(tr) }],
             status: 'success',
             toolUseId: tr.tool_call_id
           })
       } else {
         curTrs.push({
-          content: [{ text: truncate(getContentText(curMsg), toolResultLimit) }],
+          content: [{ text: getContentText(curMsg) }],
           status: 'success',
           toolUseId: curMsg.tool_call_id
         })
@@ -127,7 +158,7 @@ export function transformToCodeWhisperer(
       for (const p of curMsg.content) {
         if (p.type === 'tool_result') {
           curTrs.push({
-            content: [{ text: truncate(getContentText(p.content || p), toolResultLimit) }],
+            content: [{ text: getContentText(p.content || p) }],
             status: 'success',
             toolUseId: p.tool_use_id
           })
@@ -139,7 +170,8 @@ export function transformToCodeWhisperer(
         curImgs.push(...convertImagesToKiroFormat(unifiedImages))
       }
     } else curContent = getContentText(curMsg)
-    if (!curContent) curContent = curTrs.length ? 'Tool results provided.' : 'Continue'
+    if (!curContent)
+      curContent = curTrs.length ? 'Tool results provided.' : '[system: conversation continues]'
   }
   const request: CodeWhispererRequest = {
     conversationState: {
@@ -199,6 +231,7 @@ export function transformToCodeWhisperer(
     finalCurTrs.push(...orphanedTrs.map((o) => o.result))
   }
   if (history.length > 0) (request.conversationState as any).history = history
+
   const uim = request.conversationState.currentMessage.userInputMessage
   if (uim) {
     uim.content = curContent
@@ -232,6 +265,19 @@ export function transformToCodeWhisperer(
       }
     }
   }
+
+  return { request, resolved, convId }
+}
+
+export function transformToCodeWhisperer(
+  url: string,
+  body: any,
+  model: string,
+  auth: KiroAuthDetails,
+  think = false,
+  budget = 20000
+): PreparedRequest {
+  const { request, resolved, convId } = buildCodeWhispererRequest(body, model, auth, think, budget)
   const osP = os.platform(),
     osR = os.release(),
     nodeV = process.version.replace('v', '')
@@ -258,5 +304,31 @@ export function transformToCodeWhisperer(
     streaming: true,
     effectiveModel: resolved,
     conversationId: convId
+  }
+}
+
+export function transformToSdkRequest(
+  body: any,
+  model: string,
+  auth: KiroAuthDetails,
+  think = false,
+  budget = 20000,
+  showToast?: ToastFunction
+): SdkPreparedRequest {
+  const { request, resolved, convId } = buildCodeWhispererRequest(
+    body,
+    model,
+    auth,
+    think,
+    budget,
+    showToast
+  )
+  return {
+    conversationState: request.conversationState,
+    profileArn: request.profileArn,
+    streaming: true,
+    effectiveModel: resolved,
+    conversationId: convId,
+    region: extractRegionFromArn(auth.profileArn) ?? auth.region
   }
 }

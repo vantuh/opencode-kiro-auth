@@ -1,4 +1,5 @@
 import { parseBracketToolCalls } from '../../infrastructure/transformers/tool-call-parser.js'
+import { getContextWindowSize } from '../models.js'
 import { estimateTokens } from '../response.js'
 import { convertToOpenAI } from './openai-converter.js'
 import { findRealTag, parseStreamBuffer } from './stream-parser.js'
@@ -32,6 +33,7 @@ export async function* transformKiroStream(
 
   let rawBuffer = ''
   let totalContent = ''
+  let textOnlyContent = ''
   let outputTokens = 0
   let inputTokens = 0
   let contextUsagePercentage: number | null = null
@@ -54,6 +56,7 @@ export async function* transformKiroStream(
           contextUsagePercentage = event.data.contextUsagePercentage
         } else if (event.type === 'content' && event.data) {
           totalContent += event.data
+          textOnlyContent += event.data
 
           if (!thinkingRequested) {
             for (const ev of createTextDeltaEvents(event.data, streamState)) {
@@ -266,10 +269,11 @@ export async function* transformKiroStream(
       }
     }
 
-    outputTokens = estimateTokens(totalContent)
+    outputTokens = estimateTokens(textOnlyContent)
 
     if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
-      const totalTokens = Math.round((200000 * contextUsagePercentage) / 100)
+      const contextWindow = getContextWindowSize(model)
+      const totalTokens = Math.round((contextWindow * contextUsagePercentage) / 100)
       inputTokens = Math.max(0, totalTokens - outputTokens)
     }
 

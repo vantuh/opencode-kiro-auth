@@ -4,10 +4,11 @@ import {
   deduplicateToolCalls,
   parseBracketToolCalls
 } from '../infrastructure/transformers/tool-call-parser.js'
+import { getContextWindowSize } from './models.js'
 import { ParsedResponse, ToolCall } from './types'
 
-export function parseEventStream(rawResponse: string): ParsedResponse {
-  const parsedFromEvents = parseEventStreamChunk(rawResponse)
+export function parseEventStream(rawResponse: string, model?: string): ParsedResponse {
+  const parsedFromEvents = parseEventStreamChunk(rawResponse, model)
   let fullResponseText = parsedFromEvents.content
   let allToolCalls = [...parsedFromEvents.toolCalls]
 
@@ -31,7 +32,7 @@ export function parseEventStream(rawResponse: string): ParsedResponse {
   }
 }
 
-function parseEventStreamChunk(rawText: string): ParsedResponse {
+function parseEventStreamChunk(rawText: string, model?: string): ParsedResponse {
   const events = parseAwsEventStreamBuffer(rawText)
 
   let content = ''
@@ -87,7 +88,8 @@ function parseEventStreamChunk(rawText: string): ParsedResponse {
   })
 
   if (contextUsagePercentage !== undefined) {
-    const totalTokens = Math.round((200000 * contextUsagePercentage) / 100)
+    const contextWindow = getContextWindowSize(model || '')
+    const totalTokens = Math.round((contextWindow * contextUsagePercentage) / 100)
     outputTokens = estimateTokens(content)
     inputTokens = Math.max(0, totalTokens - outputTokens)
   }

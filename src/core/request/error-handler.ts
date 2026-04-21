@@ -5,7 +5,6 @@ import type { ManagedAccount } from '../../plugin/types'
 type ToastFunction = (message: string, variant: 'info' | 'warning' | 'success' | 'error') => void
 
 interface RequestContext {
-  reductionFactor: number
   retry: number
 }
 
@@ -39,17 +38,8 @@ export class ErrorHandler {
 
     if (response.status === 400) {
       const reason = await readBody()
-      if (context.reductionFactor > 0.4) {
-        const newFactor = context.reductionFactor - 0.2
-        showToast(
-          `400: ${reason || 'unknown'}. Retrying with ${Math.round(newFactor * 100)}%...`,
-          'warning'
-        )
-        return {
-          shouldRetry: true,
-          newContext: { ...context, reductionFactor: newFactor }
-        }
-      }
+      showToast(`400: ${reason || 'unknown'}`, 'error')
+      return { shouldRetry: false }
     }
 
     if (response.status === 401 && context.retry < this.config.rate_limit_max_retries) {
@@ -103,10 +93,7 @@ export class ErrorHandler {
       return { shouldRetry: true }
     }
 
-    if (
-      (response.status === 402 || response.status === 403) &&
-      this.accountManager.getAccountCount() > 1
-    ) {
+    if (response.status === 402 || response.status === 403) {
       let errorReason = response.status === 402 ? 'Quota' : 'Forbidden'
       let isPermanent = false
       const errorBody = await response.text()
@@ -117,6 +104,9 @@ export class ErrorHandler {
           return null
         }
       })()
+      if (errorData?.message) {
+        errorReason = errorData.message
+      }
       if (errorData?.reason === 'INVALID_MODEL_ID') {
         throw new Error(`Invalid model: ${errorData.message}`)
       }
@@ -127,10 +117,30 @@ export class ErrorHandler {
       if (isPermanent) {
         account.failCount = 10
       }
-      showToast(`${response.status}: ${errorReason}. Switching account...`, 'warning')
-      this.accountManager.markUnhealthy(account, errorReason)
-      await this.repository.batchSave(this.accountManager.getAccounts())
-      return { shouldRetry: true, switchAccount: true }
+
+      if (this.accountManager.getAccountCount() > 1) {
+        showToast(`${response.status}: ${errorReason}. Switching account...`, 'warning')
+        this.accountManager.markUnhealthy(account, errorReason)
+        await this.repository.batchSave(this.accountManager.getAccounts())
+        return { shouldRetry: true, switchAccount: true }
+      }
+
+      if (
+        response.status === 403 &&
+        !isPermanent &&
+        context.retry < this.config.rate_limit_max_retries
+      ) {
+        const delay = this.config.rate_limit_retry_delay_ms * Math.pow(2, context.retry)
+        showToast(`403: ${errorReason}. Retrying in ${Math.ceil(delay / 1000)}s...`, 'warning')
+        await this.sleep(delay)
+        return {
+          shouldRetry: true,
+          newContext: { ...context, retry: context.retry + 1 }
+        }
+      }
+
+      showToast(`${response.status}: ${errorReason}`, 'error')
+      return { shouldRetry: false }
     }
 
     const reason = await readBody()

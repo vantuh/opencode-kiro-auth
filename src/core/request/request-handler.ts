@@ -1,11 +1,13 @@
+import { GenerateAssistantResponseCommand } from '@aws/codewhisperer-streaming-client'
 import type { AccountRepository } from '../../infrastructure/database/account-repository'
 import type { AccountManager } from '../../plugin/accounts'
 import type { KiroConfig } from '../../plugin/config'
 import { isPermanentError } from '../../plugin/health'
 import * as logger from '../../plugin/logger'
-import { transformToCodeWhisperer } from '../../plugin/request'
+import { transformToSdkRequest } from '../../plugin/request'
+import { createSdkClient } from '../../plugin/sdk-client'
 import { syncFromKiroCli } from '../../plugin/sync/kiro-cli'
-import type { KiroAuthDetails, ManagedAccount, PreparedRequest } from '../../plugin/types'
+import type { KiroAuthDetails, ManagedAccount, SdkPreparedRequest } from '../../plugin/types'
 import { AccountSelector } from '../account/account-selector'
 import { UsageTracker } from '../account/usage-tracker'
 import { TokenRefresher } from '../auth/token-refresher'
@@ -59,7 +61,6 @@ export class RequestHandler {
     const think = model.endsWith('-thinking') || !!body.providerOptions?.thinkingConfig
     const budget = body.providerOptions?.thinkingConfig?.thinkingBudget || 20000
 
-    let reductionFactor = 1.0
     let retry = 0
     let consecutiveNullAccounts = 0
     const retryContext = this.retryStrategy.createContext()
@@ -96,58 +97,74 @@ export class RequestHandler {
         continue
       }
 
-      const prep = this.prepareRequest(url, init?.body, model, auth, think, budget, reductionFactor)
+      const sdkPrep = this.prepareSdkRequest(init?.body, model, auth, think, budget, showToast)
 
       const apiTimestamp = this.config.enable_log_api_request ? logger.getTimestamp() : null
       if (apiTimestamp) {
-        this.logRequest(prep, acc, apiTimestamp)
+        this.logSdkRequest(sdkPrep, acc, apiTimestamp)
       }
 
       try {
-        const res = await fetch(prep.url, prep.init)
+        const client = createSdkClient(auth, sdkPrep.region)
+        const command = new GenerateAssistantResponseCommand({
+          conversationState: sdkPrep.conversationState as any,
+          profileArn: sdkPrep.profileArn
+        })
+
+        const sdkResponse = await client.send(command)
 
         if (apiTimestamp) {
-          this.logResponse(res, prep, apiTimestamp)
+          this.logSdkResponse(sdkPrep, apiTimestamp)
         }
 
-        if (res.ok) {
-          this.handleSuccessfulRequest(acc)
-          this.usageTracker.syncUsage(acc, auth)
-          return await this.responseHandler.handleSuccess(
-            res,
-            model,
-            prep.conversationId,
-            prep.streaming
-          )
-        }
+        this.handleSuccessfulRequest(acc)
+        this.usageTracker.syncUsage(acc, auth)
 
-        const errorResult = await this.errorHandler.handle(
-          null,
-          res,
-          acc,
-          { reductionFactor, retry },
-          showToast
+        return await this.responseHandler.handleSdkSuccess(
+          sdkResponse,
+          model,
+          sdkPrep.conversationId,
+          sdkPrep.streaming
         )
+      } catch (e: any) {
+        const httpStatus = e?.$metadata?.httpStatusCode
 
-        if (errorResult.shouldRetry) {
-          if (errorResult.newContext) {
-            reductionFactor = errorResult.newContext.reductionFactor
-            retry = errorResult.newContext.retry
+        if (httpStatus) {
+          if (apiTimestamp) {
+            this.logSdkError(sdkPrep, e, acc, apiTimestamp)
           }
-          if (errorResult.switchAccount) {
+
+          const mockResponse = new Response(
+            JSON.stringify({ message: e.message, __type: e.name }),
+            {
+              status: httpStatus,
+              statusText: e.name || 'Error',
+              headers: { 'Content-Type': 'application/json' }
+            }
+          )
+
+          const errorResult = await this.errorHandler.handle(
+            e,
+            mockResponse,
+            acc,
+            { retry },
+            showToast
+          )
+
+          if (errorResult.shouldRetry) {
+            if (errorResult.newContext) {
+              retry = errorResult.newContext.retry
+            }
+            if (errorResult.switchAccount) {
+              continue
+            }
             continue
           }
-          continue
+
+          throw new Error(`Kiro Error: ${httpStatus}`)
         }
 
-        this.logError(prep, res, acc, apiTimestamp)
-        throw new Error(`Kiro Error: ${res.status}`)
-      } catch (e) {
-        const networkResult = await this.errorHandler.handleNetworkError(
-          e,
-          { reductionFactor, retry },
-          showToast
-        )
+        const networkResult = await this.errorHandler.handleNetworkError(e, { retry }, showToast)
 
         if (networkResult.shouldRetry) {
           if (networkResult.newContext) {
@@ -165,16 +182,15 @@ export class RequestHandler {
     return url.match(/models\/([^/:]+)/)?.[1] || null
   }
 
-  private prepareRequest(
-    url: string,
+  private prepareSdkRequest(
     body: any,
     model: string,
     auth: KiroAuthDetails,
     think: boolean,
     budget: number,
-    reductionFactor: number
-  ): PreparedRequest {
-    return transformToCodeWhisperer(url, body, model, auth, think, budget, reductionFactor)
+    showToast?: (message: string, variant: 'info' | 'warning' | 'success' | 'error') => void
+  ): SdkPreparedRequest {
+    return transformToSdkRequest(body, model, auth, think, budget, showToast)
   }
 
   private handleSuccessfulRequest(acc: ManagedAccount): void {
@@ -189,17 +205,21 @@ export class RequestHandler {
     }
   }
 
-  private logRequest(prep: PreparedRequest, acc: ManagedAccount, timestamp: string): void {
-    let b = null
-    try {
-      b = prep.init.body ? JSON.parse(prep.init.body as string) : null
-    } catch {}
+  private logSdkRequest(prep: SdkPreparedRequest, acc: ManagedAccount, timestamp: string): void {
     logger.logApiRequest(
       {
-        url: prep.url,
-        method: prep.init.method,
-        headers: prep.init.headers,
-        body: b,
+        url: `https://q.${prep.region}.amazonaws.com/generateAssistantResponse`,
+        method: 'POST',
+        headers: { 'x-amzn-kiro-agent-mode': 'vibe' },
+        body: {
+          conversationState: {
+            chatTriggerType: prep.conversationState.chatTriggerType,
+            conversationId: prep.conversationState.conversationId,
+            historyLength: (prep.conversationState as any).history?.length || 0,
+            currentMessage: prep.conversationState.currentMessage
+          },
+          profileArn: prep.profileArn
+        },
         conversationId: prep.conversationId,
         model: prep.effectiveModel,
         email: acc.email
@@ -208,16 +228,12 @@ export class RequestHandler {
     )
   }
 
-  private logResponse(res: Response, prep: PreparedRequest, timestamp: string): void {
-    const h: any = {}
-    res.headers.forEach((v, k) => {
-      h[k] = v
-    })
+  private logSdkResponse(prep: SdkPreparedRequest, timestamp: string): void {
     logger.logApiResponse(
       {
-        status: res.status,
-        statusText: res.statusText,
-        headers: h,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
         conversationId: prep.conversationId,
         model: prep.effectiveModel
       },
@@ -225,35 +241,28 @@ export class RequestHandler {
     )
   }
 
-  private logError(
-    prep: PreparedRequest,
-    res: Response,
+  private logSdkError(
+    prep: SdkPreparedRequest,
+    error: any,
     acc: ManagedAccount,
-    apiTimestamp: string | null
+    apiTimestamp: string
   ): void {
-    const h: any = {}
-    res.headers.forEach((v, k) => {
-      h[k] = v
-    })
+    const status = error?.$metadata?.httpStatusCode || 0
     const rData = {
-      status: res.status,
-      statusText: res.statusText,
-      headers: h,
-      error: `Kiro Error: ${res.status}`,
+      status,
+      statusText: error?.name || 'Error',
+      headers: {},
+      error: `Kiro Error: ${status} - ${error?.message || 'Unknown'}`,
       conversationId: prep.conversationId,
       model: prep.effectiveModel
     }
-    let lastB = null
-    try {
-      lastB = prep.init.body ? JSON.parse(prep.init.body as string) : null
-    } catch {}
     if (!this.config.enable_log_api_request) {
       logger.logApiError(
         {
-          url: prep.url,
-          method: prep.init.method,
-          headers: prep.init.headers,
-          body: lastB,
+          url: `https://q.${prep.region}.amazonaws.com/generateAssistantResponse`,
+          method: 'POST',
+          headers: {},
+          body: null,
           conversationId: prep.conversationId,
           model: prep.effectiveModel,
           email: acc.email
@@ -261,6 +270,8 @@ export class RequestHandler {
         rData,
         logger.getTimestamp()
       )
+    } else {
+      logger.logApiResponse(rData, apiTimestamp)
     }
   }
 

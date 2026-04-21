@@ -89,9 +89,3 @@ export function getContentText(m: any): string {
       .join('')
   return m.text || ''
 }
-
-export function truncate(s: string, max: number): string {
-  if (s.length <= max) return s
-  const half = Math.floor(max / 2)
-  return s.substring(0, half) + '\n... [TRUNCATED] ...\n' + s.substring(s.length - half)
-}

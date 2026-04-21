@@ -54,7 +54,7 @@ export interface CodeWhispererMessage {
     content: string
     modelId: string
     origin: string
-    images?: Array<{ format: string; source: { bytes: string } }>
+    images?: Array<{ format: string; source: { bytes: Uint8Array } }>
     userInputMessageContext?: {
       toolResults?: Array<{
         toolUseId: string
@@ -110,6 +110,15 @@ export interface PreparedRequest {
   streaming: boolean
   effectiveModel: string
   conversationId: string
+}
+
+export interface SdkPreparedRequest {
+  conversationState: CodeWhispererRequest['conversationState']
+  profileArn?: string
+  streaming: boolean
+  effectiveModel: string
+  conversationId: string
+  region: string
 }
 
 export type AccountSelectionStrategy = 'sticky' | 'round-robin' | 'lowest-usage'
