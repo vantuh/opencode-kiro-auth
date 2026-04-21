@@ -53,6 +53,12 @@ export class AccountSelector {
 
     this.resetCircuitBreaker()
 
+    const used = acc.usedCount ?? 0
+    const limit = acc.limitCount ?? 0
+    if (limit > 0 && used / limit >= 0.9 && this.accountManager.shouldShowUsageToast()) {
+      showToast(this.formatUsageMessage(used, limit, acc.email || ''), 'warning')
+    }
+
     return acc
   }
 

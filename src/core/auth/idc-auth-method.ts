@@ -115,6 +115,9 @@ export class IdcAuthMethod {
               profileArn
             })
           } catch (e) {
+            logger.warn('fetchUsageLimits failed during auth', {
+              error: e instanceof Error ? e.message : String(e)
+            })
             if (startUrl && !profileArn) {
               throw new Error(
                 `Missing profile ARN for IAM Identity Center. Set "idc_profile_arn" in ~/.config/opencode/kiro.json, or run "kiro-cli profile" once so it can be auto-detected. Original error: ${
@@ -122,9 +125,35 @@ export class IdcAuthMethod {
                 }`
               )
             }
-            throw e
+            usage = {
+              usedCount: 0,
+              limitCount: 0,
+              email: undefined
+            }
           }
-          if (!usage.email) return { type: 'failed' }
+
+          if (!usage.email) {
+            try {
+              const tokenParts = token.accessToken.split('.')
+              if (tokenParts.length === 3 && tokenParts[1]) {
+                const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString())
+                usage.email =
+                  payload.email || payload.sub || `user-${token.clientId.substring(0, 8)}@idc.local`
+              } else {
+                usage.email = `user-${token.clientId.substring(0, 8)}@idc.local`
+              }
+            } catch {
+              usage.email = `user-${token.clientId.substring(0, 8)}@idc.local`
+            }
+          }
+
+          if (!usage.email) {
+            usage.email = `user-${token.clientId.substring(0, 8)}@idc.local`
+          }
+
+          if (!usage.email) {
+            return { type: 'failed' }
+          }
 
           const id = createDeterministicAccountId(usage.email, 'idc', token.clientId, profileArn)
           const acc: ManagedAccount = {
