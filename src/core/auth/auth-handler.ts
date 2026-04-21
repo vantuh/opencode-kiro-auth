@@ -4,6 +4,8 @@ import { RegionSchema } from '../../plugin/config/schema.js'
 import * as logger from '../../plugin/logger.js'
 import { IdcAuthMethod } from './idc-auth-method.js'
 
+type ToastFunction = (message: string, variant: 'info' | 'warning' | 'success' | 'error') => void
+
 export class AuthHandler {
   private accountManager?: any
 
@@ -12,7 +14,7 @@ export class AuthHandler {
     private repository: AccountRepository
   ) {}
 
-  async initialize(): Promise<void> {
+  async initialize(showToast?: ToastFunction): Promise<void> {
     const { syncFromKiroCli } = await import('../../plugin/sync/kiro-cli.js')
 
     logger.log('Auth init', { autoSyncKiroCli: !!this.config.auto_sync_kiro_cli })
@@ -25,6 +27,32 @@ export class AuthHandler {
         for (const a of accounts) this.accountManager.addAccount(a)
       }
       logger.log('Kiro CLI sync: done', { importedAccounts: accounts.length })
+    }
+
+    this.logUsageSummary(showToast)
+  }
+
+  private logUsageSummary(showToast?: ToastFunction): void {
+    if (!this.accountManager) return
+    const accounts = this.accountManager.getAccounts()
+    if (!accounts.length) return
+
+    for (const acc of accounts) {
+      const used = acc.usedCount ?? 0
+      const limit = acc.limitCount ?? 0
+      if (limit > 0) {
+        const pct = Math.round((used / limit) * 100)
+        const msg = `Kiro usage (${acc.email}): ${used}/${limit} (${pct}%)`
+        logger.log(msg)
+        if (showToast) {
+          const variant = pct >= 90 ? 'warning' : 'info'
+          setTimeout(() => showToast(msg, variant), 3000)
+        }
+      } else if (used > 0) {
+        const msg = `Kiro usage (${acc.email}): ${used} requests used`
+        logger.log(msg)
+        if (showToast) setTimeout(() => showToast(msg, 'info'), 3000)
+      }
     }
   }
 
@@ -39,6 +67,9 @@ export class AuthHandler {
 
     const idcMethod = new IdcAuthMethod(this.config, this.repository, this.accountManager)
 
+    const configStartUrl = this.config.idc_start_url
+    const configRegion = this.config.idc_region
+
     return [
       {
         label: 'AWS Builder ID / IAM Identity Center',
@@ -47,7 +78,9 @@ export class AuthHandler {
           {
             type: 'text' as const,
             key: 'start_url',
-            message: 'IAM Identity Center Start URL (leave blank for AWS Builder ID)',
+            message: configStartUrl
+              ? `IAM Identity Center Start URL (current: ${configStartUrl}, leave blank to keep)`
+              : 'IAM Identity Center Start URL (leave blank for AWS Builder ID)',
             placeholder: 'https://your-company.awsapps.com/start',
             validate: (value: string) => {
               if (!value) return undefined
@@ -62,7 +95,10 @@ export class AuthHandler {
           {
             type: 'text' as const,
             key: 'idc_region',
-            message: 'IAM Identity Center region (sso_region) (leave blank for us-east-1)',
+            message:
+              configRegion && configRegion !== 'us-east-1'
+                ? `IAM Identity Center region (sso_region) (current: ${configRegion}, leave blank to keep)`
+                : 'IAM Identity Center region (sso_region) (leave blank for us-east-1)',
             placeholder: 'us-east-1',
             validate: (value: string) => {
               if (!value) return undefined

@@ -130,7 +130,8 @@ export async function syncFromKiroCli() {
         if (
           existingById &&
           existingById.is_healthy === 1 &&
-          existingById.expires_at >= cliExpiresAt
+          existingById.expires_at >= cliExpiresAt &&
+          existingById.expires_at > Date.now()
         )
           continue
 
