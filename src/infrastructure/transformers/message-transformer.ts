@@ -20,15 +20,16 @@ export function sanitizeHistory(history: CodeWhispererMessage[]): CodeWhispererM
     }
   }
 
-  if (result.length > 0) {
+  while (result.length > 0) {
     const first = result[0]
-    if (
-      !first ||
-      !first.userInputMessage ||
-      first.userInputMessage.userInputMessageContext?.toolResults
-    ) {
-      return []
-    }
+    if (first?.userInputMessage && !first.userInputMessage.userInputMessageContext?.toolResults)
+      break
+    result.shift()
+  }
+  if (result.length === 0) return []
+
+  while (result.length > 0 && result[result.length - 1]?.assistantResponseMessage) {
+    result.pop()
   }
 
   return result

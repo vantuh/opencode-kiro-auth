@@ -57,10 +57,10 @@ export class KiroDatabase {
         is_healthy, unhealthy_reason, recovery_time, fail_count, last_used,
         used_count, limit_count, last_sync
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(refresh_token) DO UPDATE SET
+      ON CONFLICT(id) DO UPDATE SET
         id=excluded.id, email=excluded.email, auth_method=excluded.auth_method,
         region=excluded.region, oidc_region=excluded.oidc_region, client_id=excluded.client_id, client_secret=excluded.client_secret,
-        profile_arn=excluded.profile_arn, start_url=excluded.start_url,
+        profile_arn=excluded.profile_arn, start_url=excluded.start_url, refresh_token=excluded.refresh_token,
         access_token=excluded.access_token, expires_at=excluded.expires_at,
         rate_limit_reset=excluded.rate_limit_reset, is_healthy=excluded.is_healthy,
         unhealthy_reason=excluded.unhealthy_reason, recovery_time=excluded.recovery_time,

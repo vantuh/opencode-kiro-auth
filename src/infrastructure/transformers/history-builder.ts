@@ -108,7 +108,19 @@ export function buildHistory(
         continue
       }
 
-      history.push({ assistantResponseMessage: arm })
+      const prevMsg = history[history.length - 1]
+      if (prevMsg && prevMsg.assistantResponseMessage) {
+        // Merge consecutive assistant messages instead of injecting synthetic user turn
+        const prev = prevMsg.assistantResponseMessage
+        if (arm.content) {
+          prev.content = prev.content ? `${prev.content}\n\n${arm.content}` : arm.content
+        }
+        if (arm.toolUses) {
+          prev.toolUses = [...(prev.toolUses || []), ...arm.toolUses]
+        }
+      } else {
+        history.push({ assistantResponseMessage: arm })
+      }
     }
   }
   return history

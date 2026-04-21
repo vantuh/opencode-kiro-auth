@@ -2,6 +2,7 @@ import type { AccountRepository } from '../../infrastructure/database/account-re
 import { accessTokenExpired } from '../../kiro/auth'
 import type { AccountManager } from '../../plugin/accounts'
 import { KiroTokenRefreshError } from '../../plugin/errors'
+import * as logger from '../../plugin/logger'
 import { refreshAccessToken } from '../../plugin/token'
 import type { KiroAuthDetails, ManagedAccount } from '../../plugin/types'
 
@@ -45,6 +46,11 @@ export class TokenRefresher {
     account: ManagedAccount,
     showToast: ToastFunction
   ): Promise<{ account: ManagedAccount; shouldContinue: boolean }> {
+    logger.error('Token refresh failed', {
+      email: account.email,
+      code: error instanceof KiroTokenRefreshError ? error.code : undefined,
+      message: error instanceof Error ? error.message : String(error)
+    })
     if (this.config.auto_sync_kiro_cli) {
       await this.syncFromKiroCli()
     }
@@ -78,6 +84,11 @@ export class TokenRefresher {
       return { account, shouldContinue: true }
     }
 
+    logger.error('Token refresh unrecoverable', {
+      email: account.email,
+      code: error instanceof KiroTokenRefreshError ? error.code : undefined,
+      message: error instanceof Error ? error.message : String(error)
+    })
     throw error
   }
 }

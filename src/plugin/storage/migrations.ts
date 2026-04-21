@@ -6,6 +6,7 @@ export function runMigrations(db: Database): void {
   migrateUsageTable(db)
   migrateStartUrlColumn(db)
   migrateOidcRegionColumn(db)
+  migrateDropRefreshTokenUniqueIndex(db)
 }
 
 function migrateToUniqueRefreshToken(db: Database): void {
@@ -145,4 +146,38 @@ function migrateOidcRegionColumn(db: Database): void {
   }
   // Backfill: historically `region` was used for both service + OIDC.
   db.run('UPDATE accounts SET oidc_region = region WHERE oidc_region IS NULL OR oidc_region = \"\"')
+}
+
+function migrateDropRefreshTokenUniqueIndex(db: Database): void {
+  // Drop the UNIQUE index on refresh_token — it was only needed for ON CONFLICT(refresh_token)
+  // upsert mechanics. Now that we use ON CONFLICT(id), this index is unnecessary and actively
+  // harmful: duplicate rows (same account, different legacy vs hash id) share the same
+  // refresh_token, causing UNIQUE constraint violations on every upsert.
+  db.run('DROP INDEX IF EXISTS idx_refresh_token_unique')
+
+  // Clean up duplicate rows: same email + same refresh_token but different ids.
+  // Keep the deterministic hash id (64-char hex), delete legacy kiro-cli-sync-* rows.
+  const duplicates = db
+    .prepare(
+      `SELECT email, refresh_token FROM accounts
+       GROUP BY email, refresh_token
+       HAVING COUNT(*) > 1`
+    )
+    .all() as any[]
+
+  for (const dup of duplicates) {
+    const rows = db
+      .prepare(
+        `SELECT id FROM accounts WHERE email = ? AND refresh_token = ?
+         ORDER BY
+           CASE WHEN id LIKE 'kiro-cli-sync-%' THEN 1 ELSE 0 END ASC,
+           last_used DESC, expires_at DESC`
+      )
+      .all(dup.email, dup.refresh_token) as any[]
+
+    // Keep the first row (deterministic hash id preferred), delete the rest
+    for (const row of rows.slice(1)) {
+      db.prepare('DELETE FROM accounts WHERE id = ?').run(row.id)
+    }
+  }
 }

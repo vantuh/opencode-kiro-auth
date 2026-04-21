@@ -210,6 +210,25 @@ If you need to enter provider-specific values for an OAuth login (like IAM Ident
 
 Note for IDC/SSO (ODIC): the plugin may temporarily create an account with a placeholder email if it cannot fetch the real email during sync (e.g. offline). It will replace it with the real email once usage/email lookup succeeds.
 
+### Kiro CLI (Google/GitHub OAuth) users: plugin sync never runs
+
+If you authenticated via `kiro-cli login` using Google or GitHub OAuth (not AWS Builder ID or IAM Identity Center), the plugin's sync may never trigger. This happens because OpenCode requires a kiro entry in `auth.json` before making API requests, but the plugin loader only runs when a request is made.
+
+**Workaround:** Add a minimal placeholder entry to `~/.local/share/opencode/auth.json`:
+
+```json
+{
+  "kiro": {
+    "type": "api",
+    "key": "placeholder"
+  }
+}
+```
+
+After adding this, OpenCode will treat the provider as connected, trigger the plugin loader, and the kiro-cli sync will populate `kiro.db` with your actual tokens. The placeholder values are not used for API calls.
+
+**Important:** Ensure `auto_sync_kiro_cli` is `true` in `~/.config/opencode/kiro.json` and that `kiro-cli login` succeeds before applying this workaround.
+
 ### Error: ERR_INVALID_URL
 
 `TypeError [ERR_INVALID_URL]: "undefined/chat/completions" cannot be parsed as a URL`

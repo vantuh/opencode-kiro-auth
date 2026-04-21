@@ -1,6 +1,6 @@
 import * as crypto from 'crypto'
 import * as os from 'os'
-import { KIRO_CONSTANTS } from '../constants.js'
+import { KIRO_CONSTANTS, buildUrl, extractRegionFromArn, isLongContextModel } from '../constants.js'
 import {
   buildHistory,
   extractToolNamesFromHistory,
@@ -55,9 +55,10 @@ export function transformToCodeWhisperer(
   const lastMsg = msgs[msgs.length - 1]
   if (lastMsg && lastMsg.role === 'assistant' && getContentText(lastMsg) === '{') msgs.pop()
   const cwTools = tools ? convertToolsToCodeWhisperer(tools) : []
-  const toolResultLimit = Math.floor(250000 * reductionFactor)
+  const longCtx = isLongContextModel(model)
+  const toolResultLimit = Math.floor((longCtx ? 1250000 : 250000) * reductionFactor)
   let history = buildHistory(msgs, resolved, toolResultLimit)
-  const historyLimit = Math.floor(850000 * reductionFactor)
+  const historyLimit = Math.floor((longCtx ? 4250000 : 850000) * reductionFactor)
   history = truncateHistory(history, historyLimit)
   history = injectSystemPrompt(history, sys, resolved)
   const curMsg = msgs[msgs.length - 1]
@@ -180,7 +181,7 @@ export function transformToCodeWhisperer(
   }
   if (orphanedTrs.length > 0) {
     const prev = history[history.length - 1]
-    if (prev && !prev.userInputMessage) {
+    if (!prev || prev.assistantResponseMessage) {
       history.push({
         userInputMessage: {
           content: 'Running tools...',
@@ -238,7 +239,7 @@ export function transformToCodeWhisperer(
     osP === 'win32' ? `windows#${osR}` : osP === 'darwin' ? `macos#${osR}` : `${osP}#${osR}`
   const ua = `aws-sdk-js/3.738.0 ua/2.1 os/${osN} lang/js md/nodejs#${nodeV} api/codewhisperer#3.738.0 m/E KiroIDE`
   return {
-    url: KIRO_CONSTANTS.BASE_URL.replace('{{region}}', auth.region),
+    url: buildUrl(KIRO_CONSTANTS.BASE_URL, extractRegionFromArn(auth.profileArn) ?? auth.region),
     init: {
       method: 'POST',
       headers: {
