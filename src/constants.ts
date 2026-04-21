@@ -70,9 +70,13 @@ export const MODEL_MAPPING: Record<string, string> = {
   'claude-3-7-sonnet': 'CLAUDE_3_7_SONNET_20250219_V1_0',
   'nova-swe': 'AGI_NOVA_SWE_V1_5',
   'gpt-oss-120b': 'OPENAI_GPT_OSS_120B_1_0',
-  'qwen3-coder-480b': 'QWEN3_CODER_480B_A35B_1_0',
   'minimax-m2': 'MINIMAX_MINIMAX_M2',
-  'kimi-k2-thinking': 'MOONSHOT_KIMI_K2_THINKING'
+  'kimi-k2-thinking': 'MOONSHOT_KIMI_K2_THINKING',
+  auto: 'auto',
+  'deepseek-3.2': 'deepseek-3.2',
+  'minimax-m2.5': 'minimax-m2.5',
+  'minimax-m2.1': 'minimax-m2.1',
+  'qwen3-coder-next': 'qwen3-coder-next'
 }
 
 export const SUPPORTED_MODELS = Object.keys(MODEL_MAPPING)
