@@ -26,14 +26,14 @@ export const createKiroPlugin =
     const accountManager = await AccountManager.loadFromDisk(config.account_selection_strategy)
     authHandler.setAccountManager(accountManager)
 
-    const requestHandler = new RequestHandler(accountManager, config, repository)
+    const requestHandler = new RequestHandler(accountManager, config, repository, client)
 
     return {
       auth: {
         provider: id,
         loader: async (getAuth: any) => {
           await getAuth()
-          await authHandler.initialize()
+          await authHandler.initialize(showToast as any)
 
           return {
             apiKey: '',
