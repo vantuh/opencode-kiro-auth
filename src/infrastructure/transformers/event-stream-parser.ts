@@ -76,12 +76,20 @@ export function parseAwsEventStreamBuffer(buffer: string): ParsedEvent[] {
       if (parsed.content !== undefined && !parsed.followupPrompt) {
         events.push({ type: 'content', data: parsed.content })
       } else if (parsed.name && parsed.toolUseId) {
+        const input =
+          typeof parsed.input === 'string'
+            ? parsed.input
+            : parsed.input &&
+                typeof parsed.input === 'object' &&
+                Object.keys(parsed.input).length > 0
+              ? JSON.stringify(parsed.input)
+              : ''
         events.push({
           type: 'toolUse',
           data: {
             name: parsed.name,
             toolUseId: parsed.toolUseId,
-            input: parsed.input || '',
+            input,
             stop: parsed.stop || false
           }
         })
@@ -89,7 +97,7 @@ export function parseAwsEventStreamBuffer(buffer: string): ParsedEvent[] {
         events.push({
           type: 'toolUseInput',
           data: {
-            input: parsed.input
+            input: typeof parsed.input === 'string' ? parsed.input : JSON.stringify(parsed.input)
           }
         })
       } else if (parsed.stop !== undefined && parsed.contextUsagePercentage === undefined) {
