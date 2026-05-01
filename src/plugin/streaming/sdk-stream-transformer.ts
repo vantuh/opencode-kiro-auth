@@ -2,9 +2,9 @@ import { parseBracketToolCalls } from '../../infrastructure/transformers/tool-ca
 import { getContextWindowSize } from '../models.js'
 import { estimateTokens } from '../response.js'
 import { convertToOpenAI } from './openai-converter.js'
-import { findRealTag } from './stream-parser.js'
+import { findRealTag, findThinkingOpenTag, getMaxTrailingPrefixLength } from './stream-parser.js'
 import { createTextDeltaEvents, createThinkingDeltaEvents, stopBlock } from './stream-state.js'
-import { StreamState, THINKING_END_TAG, THINKING_START_TAG, ToolCallState } from './types.js'
+import { StreamState, THINKING_END_TAG, ToolCallState } from './types.js'
 
 export async function* transformSdkStream(
   sdkResponse: any,
@@ -21,7 +21,8 @@ export async function* transformSdkStream(
     thinkingBlockIndex: null,
     textBlockIndex: null,
     nextBlockIndex: 0,
-    stoppedBlocks: new Set()
+    stoppedBlocks: new Set(),
+    activeEndTag: THINKING_END_TAG
   }
 
   let totalContent = ''
@@ -56,18 +57,22 @@ export async function* transformSdkStream(
 
         while (streamState.buffer.length > 0) {
           if (!streamState.inThinking && !streamState.thinkingExtracted) {
-            const startPos = findRealTag(streamState.buffer, THINKING_START_TAG)
-            if (startPos !== -1) {
-              const before = streamState.buffer.slice(0, startPos)
+            const found = findThinkingOpenTag(streamState.buffer)
+            if (found) {
+              const before = streamState.buffer.slice(0, found.pos)
               if (before) {
                 deltaEvents.push(...createTextDeltaEvents(before, streamState))
               }
-              streamState.buffer = streamState.buffer.slice(startPos + THINKING_START_TAG.length)
+              streamState.buffer = streamState.buffer.slice(found.pos + found.open.length)
+              streamState.activeEndTag = found.close
               streamState.inThinking = true
               continue
             }
 
-            const safeLen = Math.max(0, streamState.buffer.length - THINKING_START_TAG.length)
+            const safeLen = Math.max(
+              0,
+              streamState.buffer.length - getMaxTrailingPrefixLength(streamState.buffer)
+            )
             if (safeLen > 0) {
               const safeText = streamState.buffer.slice(0, safeLen)
               if (safeText) {
@@ -79,13 +84,15 @@ export async function* transformSdkStream(
           }
 
           if (streamState.inThinking) {
-            const endPos = findRealTag(streamState.buffer, THINKING_END_TAG)
+            const endPos = findRealTag(streamState.buffer, streamState.activeEndTag)
             if (endPos !== -1) {
               const thinkingPart = streamState.buffer.slice(0, endPos)
               if (thinkingPart) {
                 deltaEvents.push(...createThinkingDeltaEvents(thinkingPart, streamState))
               }
-              streamState.buffer = streamState.buffer.slice(endPos + THINKING_END_TAG.length)
+              streamState.buffer = streamState.buffer.slice(
+                endPos + streamState.activeEndTag.length
+              )
               streamState.inThinking = false
               streamState.thinkingExtracted = true
               deltaEvents.push(...createThinkingDeltaEvents('', streamState))
@@ -96,7 +103,7 @@ export async function* transformSdkStream(
               continue
             }
 
-            const safeLen = Math.max(0, streamState.buffer.length - THINKING_END_TAG.length)
+            const safeLen = Math.max(0, streamState.buffer.length - streamState.activeEndTag.length)
             if (safeLen > 0) {
               const safeThinking = streamState.buffer.slice(0, safeLen)
               if (safeThinking) {

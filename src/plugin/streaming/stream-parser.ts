@@ -1,4 +1,5 @@
 import { parseEventLine } from '../../infrastructure/transformers/event-stream-parser.js'
+import { THINKING_TAG_VARIANTS } from './types.js'
 
 export function parseStreamBuffer(buffer: string): { events: any[]; remaining: string } {
   const events: any[] = []
@@ -146,4 +147,32 @@ export function findRealTag(buffer: string, tag: string): number {
   }
 
   return -1
+}
+
+export function findThinkingOpenTag(
+  buffer: string
+): { pos: number; open: string; close: string } | null {
+  let best: { pos: number; open: string; close: string } | null = null
+  for (const variant of THINKING_TAG_VARIANTS) {
+    const pos = findRealTag(buffer, variant.open)
+    if (pos !== -1 && (best === null || pos < best.pos)) {
+      best = { pos, open: variant.open, close: variant.close }
+    }
+  }
+  return best
+}
+
+export function getMaxTrailingPrefixLength(text: string): number {
+  let maxLen = 0
+  for (const variant of THINKING_TAG_VARIANTS) {
+    const tag = variant.open
+    const maxPrefixLen = Math.min(text.length, tag.length - 1)
+    for (let len = maxPrefixLen; len > 0; len--) {
+      if (text.endsWith(tag.slice(0, len))) {
+        maxLen = Math.max(maxLen, len)
+        break
+      }
+    }
+  }
+  return maxLen
 }

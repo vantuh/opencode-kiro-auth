@@ -16,6 +16,7 @@ export interface StreamState {
   textBlockIndex: number | null
   nextBlockIndex: number
   stoppedBlocks: Set<number>
+  activeEndTag: string
 }
 
 export interface ToolCallState {
@@ -24,5 +25,11 @@ export interface ToolCallState {
   input: string
 }
 
-export const THINKING_START_TAG = '<thinking>'
 export const THINKING_END_TAG = '</thinking>'
+
+export const THINKING_TAG_VARIANTS: Array<{ open: string; close: string }> = [
+  { open: '<thinking>', close: '</thinking>' },
+  { open: '<think>', close: '</think>' },
+  { open: '<reasoning>', close: '</reasoning>' },
+  { open: '<thought>', close: '</thought>' }
+]
