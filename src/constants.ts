@@ -25,6 +25,23 @@ export function buildUrl(template: string, region: KiroRegion): string {
   }
 }
 
+const API_REGION_MAP: Record<string, KiroRegion> = {
+  'us-west-1': 'us-east-1',
+  'us-west-2': 'us-east-1',
+  'us-east-2': 'us-east-1',
+  'eu-west-1': 'eu-central-1',
+  'eu-west-2': 'eu-central-1',
+  'eu-west-3': 'eu-central-1',
+  'eu-north-1': 'eu-central-1',
+  'eu-south-1': 'eu-central-1',
+  'eu-south-2': 'eu-central-1',
+  'eu-central-2': 'eu-central-1'
+}
+
+export function resolveApiRegion(ssoRegion: KiroRegion): KiroRegion {
+  return (API_REGION_MAP[ssoRegion] as KiroRegion) ?? ssoRegion
+}
+
 export function extractRegionFromArn(arn: string | undefined): KiroRegion | undefined {
   if (!arn) return undefined
   const parts = arn.split(':')
